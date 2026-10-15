@@ -58,7 +58,8 @@ const windings = (rIn, rOut, z0, h, rows) => {
   for (let i = 1; i <= rows; i++) { const z = z0 + (h * i) / (rows + 1); for (const sg of [-1, 1]) d += k.segment(cutPt(rIn, z, sg), cutPt(rOut, z, sg), P); }
   return d;
 };
-function lens(z0, h, bore, { big = false, ro: roIn } = {}) {
+const part = (id, svg) => (id ? `<g class="tem-part" data-p="${id}">${svg}</g>` : svg);
+function lens(z0, h, bore, { big = false, ro: roIn, id } = {}) {
   const out = [], ro = roIn ?? (big ? 40 : 30), plate = 3.4;
   out.push(S(shell(bore, ro, z0, plate, { bevel: 0.5 }), { tone: "mid" }));
   out.push(S(shell(ro - 3.2, ro, z0 + plate, h - 2 * plate), { tone: "mid", crease: "none" }));
@@ -67,7 +68,11 @@ function lens(z0, h, bore, { big = false, ro: roIn } = {}) {
   out.push(S(shell(bore, ro, z0 + h - plate, plate, { bevel: 0.5 }), { tone: "mid" }));
   out.push(S(shell(bore, bore + 3.4, z0 + h, 1.8, { bevel: 0.3 }), { tone: "lo" }));
   out.push(S(shell(bore, bore + 3.4, z0 - 1.8, 1.8), { tone: "lo" }));
-  return out.join("");
+  return part(id, out.join(""));
+}
+// a deflection or stigmator coil ring on the column
+function coil(id, z0, h, rIn, rOut) {
+  return part(id, S(shell(rIn, rOut, z0, h, { bevel: 0.3 }), { tone: "hi", crease: "lo" }));
 }
 const column = (rIn, rOut, z, h, tone = "mid") => S(shell(rIn, rOut, z, h), { tone, crease: "none" });
 const flange = (r0, r1, z, tone = "mid") => S(shell(r0, r1, z, 2.6, { bevel: 0.4 }), { tone });
@@ -159,7 +164,7 @@ function apertureRod(zv, sign, r0, r1) {
 // ---- gun
 function gun() {
   const out = [], z0 = 282;
-  out.push(column(9, 13, 278, 8));
+  out.push(column(9, 13, 278, 8), coil("gdef", 278.6, 3, 12.6, 19), coil("gdef", 282.4, 3, 12.6, 19));
   out.push(flange(9, 24, z0 + 4));
   out.push(S(shell(4, 22, z0 + 8, 4, { bevel: 0.4 }), { tone: "hi", crease: "lo" }));
   out.push(S(shell(0.1, 17, z0 + 14, 14, { bevel: 0.5 }), { tone: "mid" }));
@@ -171,7 +176,7 @@ function gun() {
   out.push(S(k.cylinder(0, 0, 18, z0 + 106, 4, P, 48, 0.5), { tone: "hi", crease: "lo" }));
   out.push(D(Array.from({ length: 8 }, (_, i) => { const a = (i / 8) * 2 * Math.PI; return at([Math.cos(a) * 14, Math.sin(a) * 14, z0 + 110]); }), { size: 0.45 }));
   out.push(S(k.cylinder(0, 0, 4.6, z0 + 110, 6, P, 20), { tone: "mid" }));
-  return out.join("");
+  return part("gun hv", out.join(""));
 }
 const filament = () => {
   const z = Z.source, tip = at([0, 0, z]);
@@ -181,14 +186,15 @@ const filament = () => {
 
 // ---- the column (z layout matches model.mjs)
 const column1 = [
-  column(18, 22, 56, 4), lens(58, 22, 18, { big: true }), column(18, 22, 80, 16), lens(96, 20, 18, { ro: 34 }),
-  column(18, 22, 116, 28), flange(9, 26, 144), lens(146, 12, 9),
+  column(18, 22, 56, 4), lens(58, 22, 18, { big: true, id: "proj" }), column(18, 22, 80, 16), lens(96, 20, 18, { ro: 34, id: "int" }),
+  column(18, 22, 116, 28), flange(9, 26, 144), lens(146, 12, 9, { id: "obj" }),
 ].join("");
 const column2 = [
-  column(9, 13, 158, 30), flange(9, 22, 160), flange(9, 22, 186), lens(188, 18, 9), column(9, 13, 206, 8),
-  lens(214, 20, 9), column(9, 13, 234, 24), flange(9, 20, 236), flange(9, 20, 242), lens(258, 20, 9),
+  column(9, 13, 158, 30), flange(9, 22, 160), flange(9, 22, 186), lens(188, 18, 9, { id: "obj" }),
+  column(9, 13, 206, 8), coil("cla cm", 206.2, 7.6, 12.6, 21),
+  lens(214, 20, 9, { id: "c2" }), column(9, 13, 234, 24), flange(9, 20, 236), flange(9, 20, 242), coil("cla", 250, 5, 12.6, 21), lens(258, 20, 9, { id: "c1" }),
 ].join("");
-const specimenGrid = () => S(k.cylinder(0, 0, 3.4, Z.spec + 1.4, 1.2, P, 32), { tone: "hi", lit: true }) + L(k.ring(0, 0, 1.9, Z.spec + 2.9, P, 24), { tone: "lo" });
+const specimenGrid = () => part("spec", S(k.cylinder(0, 0, 3.4, Z.spec + 1.4, 1.2, P, 32), { tone: "hi", lit: true }) + L(k.ring(0, 0, 1.9, Z.spec + 2.9, P, 24), { tone: "lo" }));
 
 // ---- control panels ------------------------------------------------------------------------
 const PW = (panel, u, v, z) => { const [cu, cv] = PANEL_AT[panel]; return W(cu + u * PS, cv + v * PS, z); };
@@ -248,9 +254,9 @@ const caption = (panel, u, v, text) => label(panel, u, v, text, 2.3, "start");
 const R1V = -24, R2V = -8, R3V = 12;   // local rows: top buttons, aperture buttons, knobs
 function panelL() {
   const out = [panelBox("L")];
-  out.push(button("L", "beam", 1, -40, R1V), label("L", -40, R1V + 5.6, "BEAM", 2.2));
-  ["TEM", "EDS", "NBD", "CBD"].forEach((n, i) => out.push(button("L", "probe", n, -24 + i * 10, R1V), label("L", -24 + i * 10, R1V + 5.6, n, 2.2)));
-  [["stig", "C-STIG"], ["dark", "DK.TILT"], ["bright", "BR.TILT"]].forEach(([id, n], i) => out.push(button("L", "dmode", id, 20 + i * 12, R1V), label("L", 20 + i * 12, R1V + 5.6, n, 2.1)));
+  out.push(button("L", "beam", 1, -45, R1V), label("L", -45, R1V + 5.6, "BEAM", 2.1));
+  ["TEM", "EDS", "NBD", "CBD"].forEach((n, i) => out.push(button("L", "probe", n, -32 + i * 9, R1V), label("L", -32 + i * 9, R1V + 5.6, n, 2.1)));
+  [["stig", "C-STIG"], ["dark", "DK.TILT"], ["bright", "BR.TILT"], ["gunshift", "G-SHIFT"], ["guntilt", "G-TILT"]].forEach(([id, n], i) => out.push(button("L", "dmode", id, 7 + i * 10, R1V), label("L", 7 + i * 10, R1V + 5.6, n, 1.9)));
   out.push(caption("L", -44, R2V - 5.6, "CL AP"), caption("L", 1, R2V - 5.6, "OL AP"));
   ["O", "1", "2", "3", "4"].forEach((n, i) => out.push(button("L", "cl", i, -40 + i * 8, R2V), label("L", -40 + i * 8, R2V + 5.6, n, 2.2)));
   ["O", "1", "2", "3", "4"].forEach((n, i) => out.push(button("L", "ol", i, 5 + i * 8, R2V), label("L", 5 + i * 8, R2V + 5.6, n, 2.2)));
@@ -268,21 +274,31 @@ function panelR() {
   return out.join("");
 }
 
+// ---- name tags that appear next to the parts a control touches
+const tag = (ids, text, u, z, anchor = "start") => { const [sx, sy] = at(W(u, 0, z)); return `<text class="tem-tag" data-for="${ids}" x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" text-anchor="${anchor}">${text}</text>`; };
+const TAGS = [
+  tag("gun", "전자총 (HT·필라멘트)", 28, 372), tag("gdef", "건 편향코일 (GUN SHIFT/TILT)", 26, 288),
+  tag("c1", "C1 응집렌즈 (SPOT SIZE)", 46, 268), tag("cm", "CM 미니렌즈 (α)", 36, 210), tag("cla", "빔 편향코일 (SHIFT·TILT)", 30, 253), tag("c2", "C2 응집렌즈 (BRIGHTNESS)", 44, 224),
+  tag("apCL", "CL 조리개", -34, 250, "end"), tag("obj", "대물렌즈 (OBJ FOCUS)", 44, 197), tag("spec", "시료 · 홀더 (Z)", 80, 192),
+  tag("apOL", "OL 조리개", -34, 178, "end"), tag("int", "중간렌즈", 44, 106), tag("proj", "투사렌즈", 52, 69), tag("screen", "형광 스크린", 58, 26),
+];
+
 // ---- assembly (painter's order, bottom to top, back to front)
 const body = [
   base(),
   pump(), dewar(),
-  chamber(), chamberWall(),
+  part("screen", chamber()), chamberWall(),
   column1, column2,
   boss(Z.spec, 1, 8.6), boss(M.Z_BFP, -1, 7.6), boss(238, -1, 7.6),
-  `<g data-part="holder">${holder()}</g>`,
+  `<g class="tem-part" data-p="spec" data-part="holder">${holder()}</g>`,
   gun(), specimenGrid(),
-  `<g data-part="apCL">${apertureRod(238, -1)}</g>`,
-  `<g data-part="apOL">${apertureRod(M.Z_BFP, -1)}</g>`,
+  `<g class="tem-part" data-p="apCL" data-part="apCL">${apertureRod(238, -1)}</g>`,
+  `<g class="tem-part" data-p="apOL" data-part="apOL">${apertureRod(M.Z_BFP, -1)}</g>`,
   `<g data-part="filament">${filament()}</g>`,
   `<g data-part="screen"></g>`,
   `<g data-part="rays"></g>`,
   panelL(), panelR(),
+  ...TAGS,
 ];
 const label_ = "A JEOL 2100 style transmission electron microscope as a cut-away column with its left and right control panels. Each knob and button on the panels changes the lenses, apertures or deflection coils, and the electron beam drawn down the column and the image or diffraction pattern on the phosphor screen change with it.";
 const svg = k.figureSvg({ width: WIDTH, height: HEIGHT, label: label_, body });
@@ -303,10 +319,10 @@ const html = k.plateHtml({
     { mark: "edge", label: "조리개 판 (빔을 가림)" },
     { mark: "dim", label: "조리개에 막힌 회절빔" },
   ],
-  caption: "L1(왼쪽)·R1(오른쪽) 패널의 컨트롤 이름과 동작은 JEOL 2100 TEM Operation Manual(globalsino.com/EM/page30.html)을 따릅니다. 렌즈 간격은 압축해 그렸고, 회절각·초점 흐림은 보이도록 과장했습니다. 조리개 크기, 격자·빔 파장, 렌즈 세기 관계는 같은 모델에서 계산됩니다.",
+  caption: "L1(왼쪽)·R1(오른쪽) 패널의 컨트롤 이름과 동작은 JEOL 2100 TEM Operation Manual(globalsino.com/EM/page30.html)을 따릅니다. 렌즈 간격은 압축해 그렸고, 회절각·초점 흐림은 보이도록 과장했습니다. 조리개 크기, 격자·빔 파장, 렌즈 세기, 빔 전류 관계는 같은 모델에서 계산됩니다. 컨트롤을 만지면 영향을 받는 부분이 빛나고 이름표가 나타납니다.",
   body: `<div class="iso-stage tem-stage" role="application" aria-label="JEOL 2100형 투과전자현미경. 아래 컨트롤 목록의 슬라이더와 버튼으로도 조작할 수 있습니다.">${svg}</div>`,
 });
-const ui = `<section class="tem-ui" aria-label="컨트롤 패널 목록"><div class="tem-info" data-info aria-live="polite"></div><div class="tem-grid" data-grid></div><p class="tem-try">해 보기 ① BRIGHTNESS로 빔을 가장 작게 모으기 ② COND STIG를 켜고 DEF/STIG X·Y로 빔 스팟을 둥글게 ③ OBJ FOCUS·Z로 상을 선명하게 ④ DARK TILT로 암시야 상 얻기 ⑤ SA DIFF로 회절 패턴 보기, 전압(HT)을 바꿔 λ 효과 보기</p></section>`;
+const ui = `<section class="tem-ui" aria-label="컨트롤 패널 목록"><div class="tem-top"><div class="tem-info" data-info aria-live="polite"></div><div class="tem-board" data-status></div></div><div class="tem-grid" data-grid></div><p class="tem-try">해 보기 ① BRIGHTNESS로 빔을 가장 작게 모으고 SPOT SIZE를 바꿔 빔 전류(밝기)가 줄어드는 것 보기 ② COND STIG를 켜고 DEF/STIG X·Y로 빔 스팟을 둥글게 ③ G-SHIFT·G-TILT로 건을 정렬(빔 이동이 사라지고 전류가 최대가 되는 지점) ④ OBJ FOCUS·Z로 상을 선명하게 ⑤ DARK TILT로 암시야 상 ⑥ SA DIFF로 회절 패턴, 전압(HT)을 바꿔 λ 효과 보기</p></section>`;
 const css = `
 .tem-stage{touch-action:none}
 .tem-c{cursor:pointer}.tem-hit{fill:transparent;stroke:none}
@@ -324,6 +340,24 @@ const css = `
 .tem-btn{font:12px var(--anatomy-mono);padding:4px 9px;border-radius:6px;border:1px solid var(--anatomy-faint);background:transparent;color:var(--anatomy-text);cursor:pointer}
 .tem-btn:hover{border-color:var(--anatomy-mid)}.tem-btn[aria-pressed="true"]{background:var(--anatomy-lit);color:var(--anatomy-paper);border-color:var(--anatomy-lit)}
 .tem-try{margin:0;color:var(--anatomy-muted)}
+.tem-top{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px;align-items:start}
+.tem-info .aff{color:var(--anatomy-strong)}
+.tem-board{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;padding:12px 14px;border-radius:10px;background:var(--anatomy-card);box-shadow:var(--anatomy-lift)}
+.tem-sec h4{margin:0 0 4px;font:600 11px var(--anatomy-mono);letter-spacing:.04em;color:var(--anatomy-muted)}
+.tem-stat{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(40px,1fr) 52px;gap:6px;align-items:center;padding:1px 4px;border-radius:5px;font:11px var(--anatomy-mono);transition:background .25s}
+.tem-stat span{color:var(--anatomy-text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tem-stat i{display:block;height:5px;border-radius:3px;background:var(--anatomy-faint);overflow:hidden}.tem-stat b{display:block;height:100%;width:0;background:var(--anatomy-mid);transition:width .12s}
+.tem-stat em{font-style:normal;text-align:right;color:var(--anatomy-strong)}
+.tem-stat[data-hl]{background:color-mix(in srgb,var(--anatomy-green) 16%,transparent)}.tem-stat[data-hl] b{background:var(--anatomy-green)}
+.tem-stat[data-hot] b{background:var(--anatomy-lit)}
+.tem-stat[data-text]{grid-template-columns:36px minmax(0,1fr)}.tem-stat[data-text] em{text-align:left}
+.tem-stage .tem-part,.tem-stage .tem-tag{transition:opacity .25s,filter .25s}
+.tem-stage[data-focus] .tem-part:not([data-hl]){opacity:.34}
+.tem-stage .tem-part[data-hl]{filter:drop-shadow(0 0 2.6px var(--anatomy-green))}
+.tem-tag{font:600 10px var(--anatomy-mono);fill:var(--anatomy-strong);opacity:0;pointer-events:none;paint-order:stroke;stroke:var(--anatomy-paper);stroke-width:3px;stroke-linejoin:round}
+.tem-tag[data-hl]{opacity:1}
+@media (max-width:860px){.tem-top{grid-template-columns:1fr}.tem-board{grid-template-columns:1fr 1fr}}
+@media (max-width:560px){.tem-board{grid-template-columns:1fr}}
 @media (max-width:560px){.tem-row{grid-template-columns:90px 1fr 44px}}
 `;
 const out = theme === "light" ? "jeol-tem-light.html" : "jeol-tem.html";

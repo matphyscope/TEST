@@ -11,12 +11,14 @@ export const CL_AP = [{ name: "OPEN", r: 3.0 }, { name: "150 µm", r: 2.6 }, { n
 export const OL_AP = [{ name: "OPEN", r: 99 }, { name: "120 µm", r: 1.7 }, { name: "60 µm", r: 1.1 }, { name: "40 µm", r: 0.7 }, { name: "20 µm", r: 0.4 }];
 export const SPOT_V = [22, 18, 14, 10, 6];            // crossover distance below C1: spot 1 is the biggest probe
 export const PRESET = { TEM: { spot: 3, alpha: 0.35, bright: 0.15 }, EDS: { spot: 1, alpha: 0.7, bright: 0.5 }, NBD: { spot: 2, alpha: 0.12, bright: 0.5 }, CBD: { spot: 3, alpha: 1, bright: 0.5 } };
-export const STIG_IDEAL = [0.32, -0.22];                // the condenser starts astigmatic, as in the manual
+export const STIG_IDEAL = [0.32, -0.22];
+export const GUN_SHIFT_IDEAL = [-0.3, 0.2];             // gun alignment starts slightly off, as it does on a real instrument
+export const GUN_TILT_IDEAL = [0.25, -0.2];                // the condenser starts astigmatic, as in the manual
 
 export const initial = () => ({
   fil: 1, kV: 200, probe: "TEM", spot: 3, alpha: 0.35, bright: 0.15, shiftX: 0, shiftY: 0,
   clAp: 1, olAp: 3, olX: 0, fn: "mag1", mag: 0.4, objFocus: 0.35, diffFocus: 0.3, dz: 0.2,
-  stig: [0.0, 0.0], defMode: "", tilt: 0, wobImg: 0, wobHT: 0,
+  stig: [0.0, 0.0], defMode: "", tilt: 0, wobImg: 0, wobHT: 0, gunShift: [0.1, 0], gunTilt: [0.12, 0],
 });
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -47,7 +49,7 @@ export const Z_BFP = Z.obj - F_OBJ;
 // beam offset that a double-deflection system adds: shift between the two coils, tilt pivoting about the specimen
 function deflect(pts, shiftX, tilt, zSpec) {
   return pts.map(([z, y]) => {
-    const w = clamp((262 - z) / 44, 0, 1);
+    const w = clamp((252 - z) / 42, 0, 1);
     return [z, y + w * (shiftX + tilt * (z - zSpec))];
   });
 }
@@ -58,11 +60,18 @@ export function optics(st, time = 0) {
   const zSpec = Z.spec + 0.07 * st.dz;
   const out = { lam, kV: st.kV, on: st.fil > 0.5, fil: st.fil };
 
-  // ---- illumination: C1 (spot size) -> CL aperture -> C2 (brightness) -> specimen
-  const zx = Z.c1 - vOf(st.spot);
+  // ---- illumination: gun -> C1 (spot size) -> CL aperture -> C2 (brightness) -> specimen
+  const V1 = vOf(st.spot), zx = Z.c1 - V1;
   const rAp = (st.clR ?? CL_AP[st.clAp].r) * (0.3 + 0.7 * st.alpha);       // alpha selector scales the convergence angle (CM minilens)
   const zf = Z.spec + 44 * (0.5 - st.bright);                  // where C2 focuses the crossover (BRIGHTNESS)
   const a = rAp / (zx - Z.clAp);                               // |dy/dz| of the marginal ray through the crossover
+  const f1 = (36 * V1) / (36 + V1), u2 = zx - Z.c2, v2 = Z.c2 - zf, f2 = (u2 * v2) / (u2 + v2);
+  const bendLenses = [lens(Z.c1, f1), lens(Z.c2, f2)];
+  // gun shift / gun tilt misalignment moves the whole bundle: follow the chief ray through the same two lenses
+  const chiefOf = (axis) => trace({ z: Z.source, y: (st.gunShift[axis] - GUN_SHIFT_IDEAL[axis]) * 0.5, s: (st.gunTilt[axis] - GUN_TILT_IDEAL[axis]) * 0.03 }, bendLenses, zSpec);
+  const chiefAt = (pts, z) => { for (let i = 0; i < pts.length - 1; i++) { const [z0, y0] = pts[i], [z1, y1] = pts[i + 1]; if (z <= z0 + 1e-9 && z >= z1 - 1e-9) return y0 + ((y1 - y0) * (z0 - z)) / (z0 - z1 || 1); } return pts.at(-1)[1]; };
+  const chief0 = chiefOf(0), chief1 = chiefOf(1);
+  const chiefSlope = (chief0.at(-2)[1] - chief0.at(-1)[1]) / (chief0.at(-2)[0] - chief0.at(-1)[0]) * -1;
   const rays = [];
   for (const sg of [-1, 1]) {
     const yC1 = sg * a * (Z.c1 - zx), yAp = -sg * rAp, yC2 = -sg * a * (zx - Z.c2);
@@ -71,7 +80,7 @@ export function optics(st, time = 0) {
     const pts = [[Z.source, 0], [Z.c1, yC1], [zx, 0], [Z.clAp, yAp], [Z.c2, yC2]];
     if (zf > zSpec) pts.push([zf, 0]);
     pts.push([zSpec, yS]);
-    rays.push(deflect(pts, st.shiftX * 1.6, st.tilt * 0.3, zSpec));
+    rays.push(deflect(pts.map(([z, y]) => [z, y + chiefAt(chief0, z)]), st.shiftX * 1.6, st.tilt * 0.3, zSpec));
   }
   const theta = Math.abs(a * (zx - Z.c2)) / Math.abs(Z.c2 - zf);
   const waistOf = (spot) => 0.5 * (vOf(spot) / 36) * (Math.abs(Z.c2 - zf) / (Z.c1 - vOf(spot) - Z.c2));
@@ -81,8 +90,18 @@ export function optics(st, time = 0) {
   out.theta = theta;
   out.beamHalf = halfW;
   out.spotRel = waist / waistOf(1);
-  out.ratio = (rAp * rAp) / Math.max(halfW * halfW, 0.04); out.density = clamp(0.16 + 0.07 * out.ratio, 0.16, 1);
-  out.shift = [st.shiftX * 1.6, st.shiftY * 1.6];
+  // beam current: electrons accepted by the CL aperture (angle seen from the crossover), times how well the gun is aligned
+  const aRef = (CL_AP[1].r * 1) / (Z.c1 - SPOT_V[0] - Z.clAp);
+  const gunErr = Math.hypot(st.gunTilt[0] - GUN_TILT_IDEAL[0], st.gunTilt[1] - GUN_TILT_IDEAL[1]);
+  const shiftErr = Math.hypot(st.gunShift[0] - GUN_SHIFT_IDEAL[0], st.gunShift[1] - GUN_SHIFT_IDEAL[1]);
+  out.gunTrans = Math.exp(-((gunErr / 0.55) ** 2)) * Math.exp(-((shiftErr / 1.4) ** 2));
+  out.current = (a / aRef) ** 2 * out.gunTrans;
+  out.gunErr = gunErr; out.shiftErr = shiftErr;
+  out.ratio = (out.current * 9) / Math.max(halfW * halfW, 0.04);
+  out.density = clamp(0.14 + 0.09 * out.ratio, 0.14, 1);
+  out.shift = [chiefAt(chief0, zSpec) + st.shiftX * 1.6, chiefAt(chief1, zSpec) + st.shiftY * 1.6];
+  out.chiefSlope = chiefSlope * 0.25;
+  out.lensK = { c1: 1 / f1, c2: 1 / f2 };
 
   // ---- imaging chain
   const lowmag = st.fn === "lowmag";
@@ -101,10 +120,12 @@ export function optics(st, time = 0) {
   const df = lensChain(Z_BFP, 28 + 6 * st.mag);
   const diffLenses = [objL, lens(Z.int, df.fi * (1 + 0.02 * st.diffFocus)), lens(Z.proj, df.fp)];
   out.camScale = df.M;
+  out.lensK.int = 1 / (st.fn === "sadiff" ? df.fi * (1 + 0.02 * st.diffFocus) : im.fi);
+  out.lensK.proj = 1 / (st.fn === "sadiff" ? df.fp : im.fp);
 
   // ---- which beams pass the objective aperture
   const s1 = (EXAG * lam) / RINGS[0].d;
-  const sT = st.tilt * 0.3;
+  const sT = st.tilt * 0.3 + chiefSlope * 0.25;
   const olOut = st.fn === "sadiff" || lowmag;
   const ol = olOut ? { r: 99 } : { r: st.olR ?? OL_AP[st.olAp].r };
   const yAp = st.olX * 2.2;
